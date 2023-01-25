@@ -740,4 +740,4 @@
 
 ### v1
 
-- Initial release
+- Initial relese
