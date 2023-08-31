@@ -1,5 +1,46 @@
 # Magisk Changelog
 
+### v26.2
+
+- [MagiskBoot] Support extracting boot image from `payload.bin`
+- [MagiskBoot] Support cpio files containing character files
+- [MagiskBoot] Support listing cpio content
+- [MagiskBoot] Directly handle AVB 1.0 signing and verification without going through Java implementation
+- [Daemon] Make daemon socket a fixed path in MAGISKTMP
+- [resetprop] Support printing property context
+- [resetprop] Support only printing persistent properties from storage
+- [resetprop] Properly support setting persistent properties bypassing property_service
+- [MagiskSU] Support `-g` and `-G` options
+- [MagiskSU] Support switching mount namespace to PID with `-t`
+- [MagiskPolicy] Fix patching extended permissions
+- [MagiskPolicy] Support more syntax for extended permissions
+- [MagiskPolicy] Support printing out the loaded sepolicy rules
+- [App] Support patching boot image from ROM zips
+- [App] Properly preserve `boot.img` when patching Samsung firmware with `init_boot.img`
+
+### v26.1
+
+- [App] Fix crashing when revoking root permissions
+- [MagiskInit] Always prefer `ext4` partitions over `f2fs` when selecting the pre-init partition
+- [General] Restore module files' context/owner/group from mirror. This is a regression introduced in v26.0
+
+### v26.0
+
+- [General] Bump minimum supported Android version to Android 6.0
+- [General] New magic mount backend. It supports loading modules into system with `overlayfs` files injected
+- [Zygisk] Release new API version 4
+- [Zygisk] Prevent crashing daemon in error
+- [Zygisk] Rewrite zygote code injection with new loader library approach
+- [Zygisk] Rewrite code unloading implementation
+- [MagiskBoot] Support amonet microloader devices
+- [MagiskBoot] Always use lz4_legacy compression on v4 boot images. This fixes boot image patching issues on Android U preview.
+- [MagiskInit] Support replacing existing \*.rc files in `overlay.d`
+- [MagiskInit] Rewrite sepolicy.rules mounting and loading implementation
+- [App] Make stub patching 100% offline
+- [App] Support patching `init_boot.img` for Samsung ODIN firmware
+- [MagiskPolicy] Fix minor bug in command line argument parsing
+- [MagiskPolicy] Update rules to support Android U
+
 ### v25.2
 
 - [MagiskInit] Fix a potential issue when stub cpio is used

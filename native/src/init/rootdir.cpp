@@ -1,11 +1,13 @@
 #include <sys/mount.h>
 #include <libgen.h>
+#include <sys/sysmacros.h>
 
 #include <magisk.hpp>
 #include <base.hpp>
+#include <selinux.hpp>
+#include <flags.h>
 
 #include "init.hpp"
-#include "magiskrc.inc"
 
 using namespace std;
 
@@ -51,11 +53,27 @@ static void patch_init_rc(const char *src, const char *dest, const char *tmp_dir
     rc_list.clear();
 
     // Inject Magisk rc scripts
-    char pfd_svc[16], ls_svc[16];
-    gen_rand_str(pfd_svc, sizeof(pfd_svc));
-    gen_rand_str(ls_svc, sizeof(ls_svc));
-    LOGD("Inject magisk services: [%s] [%s]\n", pfd_svc, ls_svc);
-    fprintf(rc, MAGISK_RC, tmp_dir, pfd_svc, ls_svc);
+    LOGD("Inject magisk rc\n");
+    fprintf(rc, R"EOF(
+on post-fs-data
+    start logd
+    exec %2$s 0 0 -- %1$s/magisk --post-fs-data
+
+on property:vold.decrypt=trigger_restart_framework
+    exec %2$s 0 0 -- %1$s/magisk --service
+
+on nonencrypted
+    exec %2$s 0 0 -- %1$s/magisk --service
+
+on property:sys.boot_completed=1
+    exec %2$s 0 0 -- %1$s/magisk --boot-complete
+
+on property:init.svc.zygote=restarting
+    exec %2$s 0 0 -- %1$s/magisk --zygote-restart
+
+on property:init.svc.zygote=stopped
+    exec %2$s 0 0 -- %1$s/magisk --zygote-restart
+)EOF", tmp_dir, MAGISK_PROC_CON);
 
     fclose(rc);
     clone_attr(src, dest);
@@ -140,45 +158,45 @@ static void magic_mount(const string &sdir, const string &ddir = "") {
     }
 }
 
-static void patch_socket_name(const char *path) {
-    static char rstr[16] = { 0 };
-    if (rstr[0] == '\0')
-        gen_rand_str(rstr, sizeof(rstr));
-    auto bin = mmap_data(path, true);
-    bin.patch({ make_pair(MAIN_SOCKET, rstr) });
-}
-
 static void extract_files(bool sbin) {
     const char *m32 = sbin ? "/sbin/magisk32.xz" : "magisk32.xz";
     const char *m64 = sbin ? "/sbin/magisk64.xz" : "magisk64.xz";
     const char *stub_xz = sbin ? "/sbin/stub.xz" : "stub.xz";
 
     if (access(m32, F_OK) == 0) {
-        auto magisk = mmap_data(m32);
+        mmap_data magisk(m32);
         unlink(m32);
         int fd = xopen("magisk32", O_WRONLY | O_CREAT, 0755);
-        unxz(fd, magisk.buf, magisk.sz);
+        unxz(fd, magisk.buf(), magisk.sz());
         close(fd);
-        patch_socket_name("magisk32");
     }
     if (access(m64, F_OK) == 0) {
-        auto magisk = mmap_data(m64);
+        mmap_data magisk(m64);
         unlink(m64);
         int fd = xopen("magisk64", O_WRONLY | O_CREAT, 0755);
-        unxz(fd, magisk.buf, magisk.sz);
+        unxz(fd, magisk.buf(), magisk.sz());
         close(fd);
-        patch_socket_name("magisk64");
         xsymlink("./magisk64", "magisk");
     } else {
         xsymlink("./magisk32", "magisk");
     }
     if (access(stub_xz, F_OK) == 0) {
-        auto stub = mmap_data(stub_xz);
+        mmap_data stub(stub_xz);
         unlink(stub_xz);
         int fd = xopen("stub.apk", O_WRONLY | O_CREAT, 0);
-        unxz(fd, stub.buf, stub.sz);
+        unxz(fd, stub.buf(), stub.sz());
         close(fd);
     }
+}
+
+void MagiskInit::parse_config_file() {
+    parse_prop_file("/data/.backup/.magisk", [&](auto key, auto value) -> bool {
+        if (key == "PREINITDEVICE") {
+            preinit_dev = value;
+            return false;
+        }
+        return true;
+    });
 }
 
 #define ROOTMIR     MIRRDIR "/system_root"
@@ -186,41 +204,47 @@ static void extract_files(bool sbin) {
 
 void MagiskInit::patch_ro_root() {
     mount_list.emplace_back("/data");
+    parse_config_file();
 
     string tmp_dir;
 
     if (access("/sbin", F_OK) == 0) {
         tmp_dir = "/sbin";
     } else {
-        char buf[8];
-        gen_rand_str(buf, sizeof(buf));
-        tmp_dir = "/dev/"s + buf;
-        xmkdir(tmp_dir.data(), 0);
+        tmp_dir = "/debug_ramdisk";
+        xmkdir("/data/debug_ramdisk", 0);
+        xmount("/debug_ramdisk", "/data/debug_ramdisk", nullptr, MS_MOVE, nullptr);
     }
 
     setup_tmp(tmp_dir.data());
     chdir(tmp_dir.data());
 
-    // Mount system_root mirror
-    xmkdir(ROOTMIR, 0755);
-    xmount("/", ROOTMIR, nullptr, MS_BIND, nullptr);
-    mount_list.emplace_back(tmp_dir + "/" ROOTMIR);
-
-    // Recreate original sbin structure if necessary
-    if (tmp_dir == "/sbin")
+    if (tmp_dir == "/sbin") {
+        // Recreate original sbin structure
+        xmkdir(ROOTMIR, 0755);
+        xmount("/", ROOTMIR, nullptr, MS_BIND, nullptr);
         recreate_sbin(ROOTMIR "/sbin", true);
+        xumount2(ROOTMIR, MNT_DETACH);
+    } else {
+        // Restore debug_ramdisk
+        xmount("/data/debug_ramdisk", "/debug_ramdisk", nullptr, MS_MOVE, nullptr);
+        rmdir("/data/debug_ramdisk");
+    }
 
     xrename("overlay.d", ROOTOVL);
 
-#if ENABLE_AVD_HACK
+#if MAGISK_DEBUG
+    extern bool avd_hack;
     // Handle avd hack
     if (avd_hack) {
         int src = xopen("/init", O_RDONLY | O_CLOEXEC);
-        auto init = mmap_data("/init");
+        mmap_data init("/init");
         // Force disable early mount on original init
-        init.patch({ make_pair("android,fstab", "xxx") });
+        for (size_t off : init.patch("android,fstab", "xxx")) {
+            LOGD("Patch @ %08zX [android,fstab] -> [xxx]\n", off);
+        }
         int dest = xopen(ROOTOVL "/init", O_CREAT | O_WRONLY | O_CLOEXEC, 0);
-        xwrite(dest, init.buf, init.sz);
+        xwrite(dest, init.buf(), init.sz());
         fclone_attr(src, dest);
         close(src);
         close(dest);
@@ -248,7 +272,8 @@ void MagiskInit::patch_ro_root() {
     // Oculus Go will use a special sepolicy if unlocked
     if (access("/sepolicy.unlocked", F_OK) == 0) {
         patch_sepolicy("/sepolicy.unlocked", ROOTOVL "/sepolicy.unlocked");
-    } else if ((access(SPLIT_PLAT_CIL, F_OK) != 0 && access("/sepolicy", F_OK) == 0) || !hijack_sepolicy()) {
+    } else if ((access(SPLIT_PLAT_CIL, F_OK) != 0 && access("/sepolicy", F_OK) == 0) ||
+               !hijack_sepolicy()) {
         patch_sepolicy("/sepolicy", ROOTOVL "/sepolicy");
     }
 
@@ -267,21 +292,22 @@ void RootFSInit::prepare() {
     rename(backup_init(), "/init");
 }
 
-#define PRE_TMPDIR "/magisk-tmp"
+#define PRE_TMPSRC "/magisk"
+#define PRE_TMPDIR PRE_TMPSRC "/tmp"
 
 void MagiskInit::patch_rw_root() {
     mount_list.emplace_back("/data");
+    parse_config_file();
+
     // Create hardlink mirror of /sbin to /root
     mkdir("/root", 0777);
     clone_attr("/sbin", "/root");
     link_path("/sbin", "/root");
 
     // Handle overlays
-    if (access("/overlay.d", F_OK) == 0) {
-        LOGD("Merge overlay.d\n");
-        load_overlay_rc("/overlay.d");
-        mv_path("/overlay.d", "/");
-    }
+    load_overlay_rc("/overlay.d");
+    mv_path("/overlay.d", "/");
+    rm_rf("/data/overlay.d");
     rm_rf("/.backup");
 
     // Patch init.rc
@@ -294,6 +320,8 @@ void MagiskInit::patch_rw_root() {
         treble = init.contains(SPLIT_PLAT_CIL);
     }
 
+    xmkdir(PRE_TMPSRC, 0);
+    xmount("tmpfs", PRE_TMPSRC, "tmpfs", 0, "mode=755");
     xmkdir(PRE_TMPDIR, 0);
     setup_tmp(PRE_TMPDIR);
     chdir(PRE_TMPDIR);
@@ -312,7 +340,7 @@ void MagiskInit::patch_rw_root() {
 }
 
 int magisk_proxy_main(int argc, char *argv[]) {
-    setup_klog();
+    rust::setup_klog();
     LOGD("%s\n", __FUNCTION__);
 
     // Mount rootfs as rw to do post-init rootfs patches
@@ -321,10 +349,12 @@ int magisk_proxy_main(int argc, char *argv[]) {
     unlink("/sbin/magisk");
 
     // Move tmpfs to /sbin
-    // For some reason MS_MOVE won't work, as a workaround bind mount then unmount
-    xmount(PRE_TMPDIR, "/sbin", nullptr, MS_BIND | MS_REC, nullptr);
-    xumount2(PRE_TMPDIR, MNT_DETACH);
+    // make parent private before MS_MOVE
+    xmount(nullptr, PRE_TMPSRC, nullptr, MS_PRIVATE, nullptr);
+    xmount(PRE_TMPDIR, "/sbin", nullptr, MS_MOVE, nullptr);
+    xumount2(PRE_TMPSRC, MNT_DETACH);
     rmdir(PRE_TMPDIR);
+    rmdir(PRE_TMPSRC);
 
     // Create symlinks pointing back to /root
     recreate_sbin("/root", false);

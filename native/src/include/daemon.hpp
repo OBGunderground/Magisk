@@ -8,7 +8,7 @@
 #include <functional>
 
 #include <socket.hpp>
-#include <core-rs.hpp>
+#include "../core/core-rs.hpp"
 
 #define AID_ROOT   0
 #define AID_SHELL  2000
@@ -25,7 +25,6 @@ enum : int {
     START_DAEMON,
     CHECK_VERSION,
     CHECK_VERSION_CODE,
-    GET_PATH,
     STOP_DAEMON,
 
     _SYNC_BARRIER_,
@@ -72,6 +71,7 @@ extern int app_process_32;
 extern int app_process_64;
 extern std::vector<module_info> *module_list;
 
+std::string find_magisk_tmp();
 int connect_daemon(int req, bool create = false);
 
 // Poll control
@@ -83,12 +83,8 @@ void clear_poll();
 // Thread pool
 void exec_task(std::function<void()> &&task);
 
-// Logging
-extern std::atomic<int> logd_fd;
-extern "C" void magisk_log_write(int prio, const char *msg, int len);
-
 // Daemon handlers
-void boot_stage_handler(int code);
+void boot_stage_handler(int client, int code);
 void denylist_handler(int client, const sock_cred *cred);
 void su_daemon_handler(int client, const sock_cred *cred);
 void zygisk_handler(int client, const sock_cred *cred);

@@ -1,14 +1,13 @@
 #pragma once
 
-#include <sys/mman.h>
 #include <sys/stat.h>
-#include <mntent.h>
 #include <functional>
 #include <string_view>
 #include <string>
 #include <vector>
 
-#include "xwrap.hpp"
+#include <linux/fs.h>
+#include "misc.hpp"
 
 template <typename T>
 static inline T align_to(T v, int a) {
@@ -26,38 +25,43 @@ struct file_attr {
     char con[128];
 };
 
-struct byte_data {
-    using str_pairs = std::initializer_list<std::pair<std::string_view, std::string_view>>;
-
-    uint8_t *buf = nullptr;
-    size_t sz = 0;
-
-    int patch(str_pairs list) { return patch(true, list); }
-    int patch(bool log, str_pairs list);
-    bool contains(std::string_view pattern, bool log = true) const;
-protected:
-    void swap(byte_data &o);
+struct mount_info {
+    unsigned int id;
+    unsigned int parent;
+    dev_t device;
+    std::string root;
+    std::string target;
+    std::string vfs_option;
+    struct {
+        unsigned int shared;
+        unsigned int master;
+        unsigned int propagate_from;
+    } optional;
+    std::string type;
+    std::string source;
+    std::string fs_option;
 };
 
 struct mmap_data : public byte_data {
-    mmap_data() = default;
-    mmap_data(const mmap_data&) = delete;
-    mmap_data(mmap_data &&o) { swap(o); }
-    mmap_data(const char *name, bool rw = false);
-    ~mmap_data() { if (buf) munmap(buf, sz); }
-    mmap_data& operator=(mmap_data &&other) { swap(other); return *this; }
+    static_assert((sizeof(void *) == 8 && BLKGETSIZE64 == 0x80081272) ||
+                  (sizeof(void *) == 4 && BLKGETSIZE64 == 0x80041272));
+    ALLOW_MOVE_ONLY(mmap_data)
+
+    explicit mmap_data(const char *name, bool rw = false);
+    mmap_data(int fd, size_t sz, bool rw = false);
+    ~mmap_data();
 };
 
 extern "C" {
 
 int mkdirs(const char *path, mode_t mode);
 ssize_t canonical_path(const char * __restrict__ path, char * __restrict__ buf, size_t bufsiz);
+bool rm_rf(const char *path);
+bool frm_rf(int dirfd);
 
 } // extern "C"
 
-using rust::fd_path;
 int fd_pathat(int dirfd, const char *name, char *path, size_t size);
-void rm_rf(const char *path);
 void mv_path(const char *src, const char *dest);
 void mv_dir(int src, int dest);
 void cp_afc(const char *src, const char *dest);
@@ -86,10 +90,9 @@ void file_readline(const char *file, const std::function<bool(std::string_view)>
 void parse_prop_file(FILE *fp, const std::function<bool(std::string_view, std::string_view)> &fn);
 void parse_prop_file(const char *file,
         const std::function<bool(std::string_view, std::string_view)> &fn);
-void frm_rf(int dirfd);
 void clone_dir(int src, int dest);
-void parse_mnt(const char *file, const std::function<bool(mntent*)> &fn);
-std::string find_apk_path(const char *pkg);
+std::vector<mount_info> parse_mount_info(const char *pid);
+std::string resolve_preinit_dir(const char *base_dir);
 
 using sFILE = std::unique_ptr<FILE, decltype(&fclose)>;
 using sDIR = std::unique_ptr<DIR, decltype(&closedir)>;

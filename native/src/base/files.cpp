@@ -1,4 +1,6 @@
+#include <sys/mman.h>
 #include <sys/sendfile.h>
+#include <sys/sysmacros.h>
 #include <linux/fs.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -10,71 +12,12 @@
 using namespace std;
 
 int fd_pathat(int dirfd, const char *name, char *path, size_t size) {
-    if (fd_path(dirfd, byte_slice(path, size)) < 0)
+    if (fd_path(dirfd, byte_data(path, size)) < 0)
         return -1;
     auto len = strlen(path);
     path[len] = '/';
     strscpy(path + len + 1, name, size - len - 1);
     return 0;
-}
-
-template <typename Func>
-static void post_order_walk(int dirfd, const Func &fn) {
-    auto dir = xopen_dir(dirfd);
-    if (!dir) return;
-
-    for (dirent *entry; (entry = xreaddir(dir.get()));) {
-        if (entry->d_type == DT_DIR)
-            post_order_walk(xopenat(dirfd, entry->d_name, O_RDONLY | O_CLOEXEC), fn);
-        fn(dirfd, entry);
-    }
-}
-
-enum walk_result {
-    CONTINUE, SKIP, ABORT
-};
-
-template <typename Func>
-static walk_result pre_order_walk(int dirfd, const Func &fn) {
-    auto dir = xopen_dir(dirfd);
-    if (!dir) {
-        close(dirfd);
-        return SKIP;
-    }
-
-    for (dirent *entry; (entry = xreaddir(dir.get()));) {
-        switch (fn(dirfd, entry)) {
-        case CONTINUE:
-            break;
-        case SKIP:
-            continue;
-        case ABORT:
-            return ABORT;
-        }
-        if (entry->d_type == DT_DIR) {
-            int fd = xopenat(dirfd, entry->d_name, O_RDONLY | O_CLOEXEC);
-            if (pre_order_walk(fd, fn) == ABORT)
-                return ABORT;
-        }
-    }
-    return CONTINUE;
-}
-
-static void remove_at(int dirfd, struct dirent *entry) {
-    unlinkat(dirfd, entry->d_name, entry->d_type == DT_DIR ? AT_REMOVEDIR : 0);
-}
-
-void rm_rf(const char *path) {
-    struct stat st;
-    if (lstat(path, &st) < 0)
-        return;
-    if (S_ISDIR(st.st_mode))
-        frm_rf(xopen(path, O_RDONLY | O_CLOEXEC));
-    remove(path);
-}
-
-void frm_rf(int dirfd) {
-    post_order_walk(dirfd, remove_at);
 }
 
 void mv_path(const char *src, const char *dest) {
@@ -343,43 +286,84 @@ void parse_prop_file(const char *file, const function<bool(string_view, string_v
         parse_prop_file(fp.get(), fn);
 }
 
-// Original source: https://android.googlesource.com/platform/bionic/+/master/libc/bionic/mntent.cpp
-// License: AOSP, full copyright notice please check original source
-static struct mntent *compat_getmntent_r(FILE *fp, struct mntent *e, char *buf, int buf_len) {
-    memset(e, 0, sizeof(*e));
-    while (fgets(buf, buf_len, fp) != nullptr) {
-        // Entries look like "proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0".
-        // That is: mnt_fsname mnt_dir mnt_type mnt_opts 0 0.
-        int fsname0, fsname1, dir0, dir1, type0, type1, opts0, opts1;
-        if (sscanf(buf, " %n%*s%n %n%*s%n %n%*s%n %n%*s%n %d %d",
-                   &fsname0, &fsname1, &dir0, &dir1, &type0, &type1, &opts0, &opts1,
-                   &e->mnt_freq, &e->mnt_passno) == 2) {
-            e->mnt_fsname = &buf[fsname0];
-            buf[fsname1] = '\0';
-            e->mnt_dir = &buf[dir0];
-            buf[dir1] = '\0';
-            e->mnt_type = &buf[type0];
-            buf[type1] = '\0';
-            e->mnt_opts = &buf[opts0];
-            buf[opts1] = '\0';
-            return e;
-        }
-    }
-    return nullptr;
-}
+std::vector<mount_info> parse_mount_info(const char *pid) {
+    char buf[PATH_MAX] = {};
+    ssprintf(buf, sizeof(buf), "/proc/%s/mountinfo", pid);
+    std::vector<mount_info> result;
 
-void parse_mnt(const char *file, const function<bool(mntent*)> &fn) {
-    auto fp = sFILE(setmntent(file, "re"), endmntent);
-    if (fp) {
-        mntent mentry{};
-        char buf[4096];
-        // getmntent_r from system's libc.so is broken on old platform
-        // use the compat one instead
-        while (compat_getmntent_r(fp.get(), &mentry, buf, sizeof(buf))) {
-            if (!fn(&mentry))
-                break;
+    file_readline(buf, [&result](string_view line) -> bool {
+        int root_start = 0, root_end = 0;
+        int target_start = 0, target_end = 0;
+        int vfs_option_start = 0, vfs_option_end = 0;
+        int type_start = 0, type_end = 0;
+        int source_start = 0, source_end = 0;
+        int fs_option_start = 0, fs_option_end = 0;
+        int optional_start = 0, optional_end = 0;
+        unsigned int id, parent, maj, min;
+        sscanf(line.data(),
+               "%u "           // (1) id
+               "%u "           // (2) parent
+               "%u:%u "        // (3) maj:min
+               "%n%*s%n "      // (4) mountroot
+               "%n%*s%n "      // (5) target
+               "%n%*s%n"       // (6) vfs options (fs-independent)
+               "%n%*[^-]%n - " // (7) optional fields
+               "%n%*s%n "      // (8) FS type
+               "%n%*s%n "      // (9) source
+               "%n%*s%n",      // (10) fs options (fs specific)
+               &id, &parent, &maj, &min, &root_start, &root_end, &target_start,
+               &target_end, &vfs_option_start, &vfs_option_end,
+               &optional_start, &optional_end, &type_start, &type_end,
+               &source_start, &source_end, &fs_option_start, &fs_option_end);
+
+        auto root = line.substr(root_start, root_end - root_start);
+        auto target = line.substr(target_start, target_end - target_start);
+        auto vfs_option =
+                line.substr(vfs_option_start, vfs_option_end - vfs_option_start);
+        ++optional_start;
+        --optional_end;
+        auto optional = line.substr(
+                optional_start,
+                optional_end - optional_start > 0 ? optional_end - optional_start : 0);
+
+        auto type = line.substr(type_start, type_end - type_start);
+        auto source = line.substr(source_start, source_end - source_start);
+        auto fs_option =
+                line.substr(fs_option_start, fs_option_end - fs_option_start);
+
+        unsigned int shared = 0;
+        unsigned int master = 0;
+        unsigned int propagate_from = 0;
+        if (auto pos = optional.find("shared:"); pos != std::string_view::npos) {
+            shared = parse_int(optional.substr(pos + 7));
         }
-    }
+        if (auto pos = optional.find("master:"); pos != std::string_view::npos) {
+            master = parse_int(optional.substr(pos + 7));
+        }
+        if (auto pos = optional.find("propagate_from:");
+                pos != std::string_view::npos) {
+            propagate_from = parse_int(optional.substr(pos + 15));
+        }
+
+        result.emplace_back(mount_info {
+                .id = id,
+                .parent = parent,
+                .device = static_cast<dev_t>(makedev(maj, min)),
+                .root {root},
+                .target {target},
+                .vfs_option {vfs_option},
+                .optional {
+                        .shared = shared,
+                        .master = master,
+                        .propagate_from = propagate_from,
+                },
+                .type {type},
+                .source {source},
+                .fs_option {fs_option},
+        });
+        return true;
+    });
+    return result;
 }
 
 sDIR make_dir(DIR *dp) {
@@ -390,75 +374,35 @@ sFILE make_file(FILE *fp) {
     return sFILE(fp, [](FILE *fp){ return fp ? fclose(fp) : 1; });
 }
 
-int byte_data::patch(bool log, str_pairs list) {
-    if (buf == nullptr)
-        return 0;
-    int count = 0;
-    for (uint8_t *p = buf, *eof = buf + sz; p < eof; ++p) {
-        for (auto [from, to] : list) {
-            if (memcmp(p, from.data(), from.length() + 1) == 0) {
-                if (log) LOGD("Replace [%s] -> [%s]\n", from.data(), to.data());
-                memset(p, 0, from.length());
-                memcpy(p, to.data(), to.length());
-                ++count;
-                p += from.length();
-            }
-        }
-    }
-    return count;
-}
-
-bool byte_data::contains(string_view pattern, bool log) const {
-    if (buf == nullptr)
-        return false;
-    for (uint8_t *p = buf, *eof = buf + sz; p < eof; ++p) {
-        if (memcmp(p, pattern.data(), pattern.length() + 1) == 0) {
-            if (log) LOGD("Found pattern [%s]\n", pattern.data());
-            return true;
-        }
-    }
-    return false;
-}
-
-void byte_data::swap(byte_data &o) {
-    std::swap(buf, o.buf);
-    std::swap(sz, o.sz);
-}
-
 mmap_data::mmap_data(const char *name, bool rw) {
-    int fd = xopen(name, (rw ? O_RDWR : O_RDONLY) | O_CLOEXEC);
-    if (fd < 0)
-        return;
-    struct stat st;
-    if (fstat(fd, &st))
-        return;
-    if (S_ISBLK(st.st_mode)) {
-        uint64_t size;
-        ioctl(fd, BLKGETSIZE64, &size);
-        sz = size;
-    } else {
-        sz = st.st_size;
+    auto slice = rust::map_file(byte_view(name), rw);
+    if (!slice.empty()) {
+        _buf = slice.data();
+        _sz = slice.size();
     }
-    void *b = sz > 0
-            ? xmmap(nullptr, sz, PROT_READ | PROT_WRITE, rw ? MAP_SHARED : MAP_PRIVATE, fd, 0)
-            : nullptr;
-    close(fd);
-    buf = static_cast<uint8_t *>(b);
 }
 
-string find_apk_path(const char *pkg) {
-    char buf[PATH_MAX];
-    size_t len = strlen(pkg);
-    pre_order_walk(xopen("/data/app", O_RDONLY), [&](int dfd, dirent *entry) -> walk_result {
-        if (entry->d_type != DT_DIR)
-            return SKIP;
-        if (strncmp(entry->d_name, pkg, len) == 0 && entry->d_name[len] == '-') {
-            fd_pathat(dfd, entry->d_name, buf, sizeof(buf));
-            return ABORT;
-        } else if (strncmp(entry->d_name, "~~", 2) == 0) {
-            return CONTINUE;
-        } else return SKIP;
-    });
-    string path(buf);
-    return path.append("/base.apk");
+mmap_data::mmap_data(int fd, size_t sz, bool rw) {
+    auto slice = rust::map_fd(fd, sz, rw);
+    if (!slice.empty()) {
+        _buf = slice.data();
+        _sz = slice.size();
+    }
+}
+
+mmap_data::~mmap_data() {
+    if (_buf)
+        munmap(_buf, _sz);
+}
+
+string resolve_preinit_dir(const char *base_dir) {
+    string dir = base_dir;
+    if (access((dir + "/unencrypted").data(), F_OK) == 0) {
+        dir += "/unencrypted/magisk";
+    } else if (access((dir + "/adb").data(), F_OK) == 0) {
+        dir += "/adb/modules";
+    } else {
+        dir += "/magisk";
+    }
+    return dir;
 }

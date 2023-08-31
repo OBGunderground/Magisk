@@ -21,9 +21,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.HashMap;
 
-import io.michaelrocks.paranoid.Obfuscate;
-
-@Obfuscate
 @SuppressWarnings("ResultOfMethodCallIgnored")
 public class DynLoad {
 
@@ -63,9 +60,11 @@ public class DynLoad {
             try {
                 File external = new File(context.getExternalFilesDir(null), "magisk.apk");
                 if (external.exists()) {
+                    apk.delete();
                     try {
                         var in = new FileInputStream(external);
                         var out = new FileOutputStream(apk);
+                        apk.setReadOnly();
                         try (in; out) {
                             APKInstall.transfer(in, out);
                         }
@@ -82,6 +81,7 @@ public class DynLoad {
         }
 
         if (apk.exists()) {
+            apk.setReadOnly();
             return new AppClassLoader(apk);
         }
 
@@ -89,8 +89,10 @@ public class DynLoad {
         if (!context.getPackageName().equals(APPLICATION_ID)) {
             try {
                 var info = context.getPackageManager().getApplicationInfo(APPLICATION_ID, 0);
+                apk.delete();
                 var src = new FileInputStream(info.sourceDir);
                 var out = new FileOutputStream(apk);
+                apk.setReadOnly();
                 try (src; out) {
                     APKInstall.transfer(src, out);
                 }
@@ -191,7 +193,7 @@ public class DynLoad {
             mcl.set(loadedApk, new DelegateClassLoader());
         } catch (Exception e) {
             // Actually impossible as this method is only called on API < 29,
-            // and API 21 - 28 do not restrict access to these fields.
+            // and API 23 - 28 do not restrict access to these fields.
             Log.e(DynLoad.class.getSimpleName(), "", e);
         }
     }

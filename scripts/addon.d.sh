@@ -80,8 +80,6 @@ main() {
   mkdir -p $TMPDIR
   cd $TMPDIR
 
-  $BOOTMODE || recovery_actions
-
   if echo $MAGISK_VER | grep -q '\.'; then
     PRETTY_VER=$MAGISK_VER
   else
@@ -104,13 +102,13 @@ main() {
   fi
 
   find_boot_image
-
   [ -z $BOOTIMAGE ] && abort "! Unable to detect target image"
   ui_print "- Target image: $BOOTIMAGE"
 
-  remove_system_su
-  find_magisk_apk
   api_level_arch_detect
+  ui_print "- Device platform: $ABI"
+
+  remove_system_su
   install_magisk
 
   # Cleanups

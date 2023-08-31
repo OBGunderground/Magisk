@@ -9,9 +9,10 @@ import com.topjohnwu.magisk.core.data.SuLogDatabase
 import com.topjohnwu.magisk.core.data.magiskdb.PolicyDao
 import com.topjohnwu.magisk.core.data.magiskdb.SettingsDao
 import com.topjohnwu.magisk.core.data.magiskdb.StringDao
+import com.topjohnwu.magisk.core.ktx.deviceProtectedContext
 import com.topjohnwu.magisk.core.repository.LogRepository
 import com.topjohnwu.magisk.core.repository.NetworkService
-import com.topjohnwu.magisk.ktx.deviceProtectedContext
+import com.topjohnwu.magisk.core.utils.BiometricHelper
 import io.noties.markwon.Markwon
 import io.noties.markwon.utils.NoCopySpannableFactory
 
@@ -23,6 +24,7 @@ object ServiceLocator {
     lateinit var context: Context
     val deContext by lazy { context.deviceProtectedContext }
     val timeoutPrefs by lazy { deContext.getSharedPreferences("su_timeout", 0) }
+    val biometrics by lazy { BiometricHelper(context) }
 
     // Database
     val policyDB = PolicyDao()
@@ -39,13 +41,13 @@ object ServiceLocator {
         NetworkService(
             createApiService(retrofit, Const.Url.GITHUB_PAGE_URL),
             createApiService(retrofit, Const.Url.GITHUB_RAW_URL),
-            createApiService(retrofit, Const.Url.GITHUB_API_URL)
         )
     }
 }
 
 private fun createSuLogDatabase(context: Context) =
     Room.databaseBuilder(context, SuLogDatabase::class.java, "sulogs.db")
+        .addMigrations(SuLogDatabase.MIGRATION_1_2)
         .fallbackToDestructiveMigration()
         .build()
 

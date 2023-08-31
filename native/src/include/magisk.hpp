@@ -2,12 +2,8 @@
 
 #include <string>
 
-// magiskinit will hex patch this constant,
-// appending \0 to prevent the compiler from reusing the string for "1"
-#define MAIN_SOCKET  "d30138f2310a9fb9c54a3e0c21f58591\0"
 #define JAVA_PACKAGE_NAME "com.topjohnwu.magisk"
 #define LOGFILE         "/cache/magisk.log"
-#define UNBLOCKFILE     "/dev/.magisk_unblock"
 #define SECURE_DIR      "/data/adb"
 #define MODULEROOT      SECURE_DIR "/modules"
 #define MODULEUPGRADE   SECURE_DIR "/modules_update"
@@ -15,19 +11,22 @@
 #define MAGISKDB        SECURE_DIR "/magisk.db"
 
 // tmpfs paths
-extern std::string  MAGISKTMP;
-#define INTLROOT    ".magisk"
-#define MIRRDIR     INTLROOT "/mirror"
-#define RULESDIR    MIRRDIR "/sepolicy.rules"
-#define BLOCKDIR    INTLROOT "/block"
-#define WORKERDIR   INTLROOT "/worker"
-#define MODULEMNT   INTLROOT "/modules"
-#define BBPATH      INTLROOT "/busybox"
-#define ROOTOVL     INTLROOT "/rootdir"
-#define SHELLPTS    INTLROOT "/pts"
-#define ROOTMNT     ROOTOVL  "/.mount_list"
-#define ZYGISKBIN   INTLROOT "/zygisk"
-#define SELINUXMOCK INTLROOT "/selinux"
+extern std::string    MAGISKTMP;
+#define INTLROOT      ".magisk"
+#define MIRRDIR       INTLROOT "/mirror"
+#define PREINITMIRR   INTLROOT "/preinit"
+#define BLOCKDIR      INTLROOT "/block"
+#define PREINITDEV    BLOCKDIR "/preinit"
+#define WORKERDIR     INTLROOT "/worker"
+#define MODULEMNT     INTLROOT "/modules"
+#define BBPATH        INTLROOT "/busybox"
+#define ROOTOVL       INTLROOT "/rootdir"
+#define SHELLPTS      INTLROOT "/pts"
+#define ROOTMNT       ROOTOVL  "/.mount_list"
+#define ZYGISKBIN     INTLROOT "/zygisk"
+#define SELINUXMOCK   INTLROOT "/selinux"
+#define MAIN_CONFIG   INTLROOT "/config"
+#define MAIN_SOCKET   INTLROOT "/socket"
 
 constexpr const char *applet_names[] = { "su", "resetprop", nullptr };
 

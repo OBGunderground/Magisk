@@ -11,7 +11,6 @@
 umask 022
 
 OUTFD=$2
-APK="$3"
 COMMONDIR=$INSTALLER/assets
 CHROMEDIR=$INSTALLER/assets/chromeos
 
@@ -48,7 +47,7 @@ ui_print "- Target image: $BOOTIMAGE"
 # Detect version and architecture
 api_level_arch_detect
 
-[ $API -lt 21 ] && abort "! Magisk only support Android 5.0 and above"
+[ $API -lt 23 ] && abort "! Magisk only support Android 6.0 and above"
 
 ui_print "- Device platform: $ABI"
 

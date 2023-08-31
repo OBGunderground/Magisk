@@ -1,20 +1,23 @@
-// This file implements all missing symbols that should exist in normal API 21
+// This file implements all missing symbols that should exist in normal API 23
 // libc.a but missing in our extremely lean libc.a replacements.
+
+#if !defined(__LP64__)
 
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <mntent.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/syscall.h>
-#include <sys/stat.h>
 
 extern "C" {
+
+#include "fortify.hpp"
 
 // Original source: https://github.com/freebsd/freebsd/blob/master/contrib/file/src/getline.c
 // License: BSD, full copyright notice please check original source
 
+[[gnu::weak]]
 ssize_t getdelim(char **buf, size_t *bufsiz, int delimiter, FILE *fp) {
     char *ptr, *eptr;
 
@@ -51,60 +54,35 @@ ssize_t getdelim(char **buf, size_t *bufsiz, int delimiter, FILE *fp) {
     }
 }
 
+[[gnu::weak]]
 ssize_t getline(char **buf, size_t *bufsiz, FILE *fp) {
     return getdelim(buf, bufsiz, '\n', fp);
 }
 
-FILE *setmntent(const char *path, const char *mode) {
-    return fopen(path, mode);
-}
-
-int endmntent(FILE *fp) {
-    if (fp != nullptr) {
-        fclose(fp);
-    }
-    return 1;
-}
-
 // Missing system call wrappers
 
-int setns(int fd, int nstype) {
-    return syscall(__NR_setns, fd, nstype);
-}
-
-int unshare(int flags) {
-    return syscall(__NR_unshare, flags);
-}
-
-int accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags) {
-    return syscall(__NR_accept4, sockfd, addr, addrlen, flags);
-}
-
-int dup3(int oldfd, int newfd, int flags) {
-    return syscall(__NR_dup3, oldfd, newfd, flags);
-}
-
+[[gnu::weak]]
 ssize_t readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
     return syscall(__NR_readlinkat, dirfd, pathname, buf, bufsiz);
 }
 
+[[gnu::weak]]
 int symlinkat(const char *target, int newdirfd, const char *linkpath) {
     return syscall(__NR_symlinkat, target, newdirfd, linkpath);
 }
 
+[[gnu::weak]]
 int linkat(int olddirfd, const char *oldpath,
            int newdirfd, const char *newpath, int flags) {
     return syscall(__NR_linkat, olddirfd, oldpath, newdirfd, newpath, flags);
 }
 
-int inotify_init1(int flags) {
-    return syscall(__NR_inotify_init1, flags);
-}
-
+[[gnu::weak]]
 int faccessat(int dirfd, const char *pathname, int mode, int flags) {
     return syscall(__NR_faccessat, dirfd, pathname, mode, flags);
 }
 
+[[gnu::weak]]
 int mkfifo(const char *path, mode_t mode) {
     return mknod(path, (mode & ~S_IFMT) | S_IFIFO, 0);
 }
@@ -113,43 +91,25 @@ int mkfifo(const char *path, mode_t mode) {
 
 #if defined(__arm__)
 // Why the additional 0 is required: https://man7.org/linux/man-pages/man2/syscall.2.html
+[[gnu::weak]]
 int ftruncate64(int fd, off64_t length) {
     return syscall(__NR_ftruncate64, fd, 0, SPLIT_64(length));
 }
 #elif defined(__i386__)
+[[gnu::weak]]
 int ftruncate64(int fd, off64_t length) {
     return syscall(__NR_ftruncate64, fd, SPLIT_64(length));
 }
 #endif
 
-#if !defined(__LP64__)
+[[gnu::weak]]
 void android_set_abort_message(const char *) {}
 
-// Original source: <android/legacy_signal_inlines.h>
-int sigaddset(sigset_t *set, int signum) {
-    /* Signal numbers start at 1, but bit positions start at 0. */
-    int bit = signum - 1;
-    auto *local_set = (unsigned long *)set;
-    if (set == nullptr || bit < 0 || bit >= (int)(8 * sizeof(sigset_t))) {
-        errno = EINVAL;
-        return -1;
-    }
-    local_set[bit / LONG_BIT] |= 1UL << (bit % LONG_BIT);
-    return 0;
-}
-int sigemptyset(sigset_t *set) {
-    if (set == nullptr) {
-        errno = EINVAL;
-        return -1;
-    }
-    memset(set, 0, sizeof(sigset_t));
-    return 0;
-}
+extern FILE __sF[];
 
-#undef vsnprintf
-#undef snprintf
-#include "fortify.hpp"
-
-#endif
+[[gnu::weak]] FILE* stdin = &__sF[0];
+[[gnu::weak]] FILE* stdout = &__sF[1];
+[[gnu::weak]] FILE* stderr = &__sF[2];
 
 } // extern "C"
+#endif

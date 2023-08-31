@@ -46,7 +46,7 @@
     <string name="install_inactive_slot_msg">Your device will be FORCED to boot to the current inactive slot after a reboot!\nOnly use this option after OTA is done.\nContinue?</string>
     <string name="setup_title">Additional Setup</string>
     <string name="select_patch_file">Select and Patch a File</string>
-    <string name="patch_file_msg">Select a raw image (*.img) or an ODIN tarfile (*.tar)</string>
+    <string name="patch_file_msg">Select a raw image (*.img) or an ODIN tarfile (*.tar) or a payload.bin (*.bin)</string>
     <string name="reboot_delay_toast">Rebooting in 5 seconds…</string>
     <string name="flash_screen_title">Installation</string>
 
@@ -88,6 +88,9 @@
     <string name="logs_cleared">Log successfully cleared</string>
     <string name="pid">PID: %1$d</string>
     <string name="target_uid">Target UID: %1$d</string>
+    <string name="target_pid">Mount ns target PID: %s</string>
+    <string name="selinux_context">SELinux context: %s</string>
+    <string name="supp_group">Supplementary group: %s</string>
 
     <!--SafetyNet-->
 
@@ -113,6 +116,8 @@
     <string name="suspend_text_zygisk">Module suspended because %1$s is not enabled</string>
     <string name="zygisk_module_unloaded">Zygisk module not loaded due to incompatibility</string>
     <string name="module_empty">No module installed</string>
+    <string name="confirm_install">Install module %1$s?</string>
+    <string name="confirm_install_title">Install Confirmation</string>
 
     <!--Settings-->
     <string name="settings_dark_mode_title">Theme Mode</string>
@@ -219,6 +224,7 @@
     <string name="setup_fail">Setup failed</string>
     <string name="env_fix_title">Requires Additional Setup</string>
     <string name="env_fix_msg">Your device needs additional setup for Magisk to work properly. Do you want to proceed and reboot?</string>
+    <string name="env_full_fix_msg">Your device needs reflash Magisk to work properly. Please reinstall Magisk within app, recovery mode cannot get correct device info.</string>
     <string name="setup_msg">Running environment setup…</string>
     <string name="authenticate">Authenticate</string>
     <string name="unsupport_magisk_title">Unsupported Magisk Version</string>

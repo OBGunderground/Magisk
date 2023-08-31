@@ -46,7 +46,7 @@
     <string name="install_inactive_slot_msg">将在重启后强制切换到另一个槽位！注意只能在 OTA 更新完成后的重启之前使用。</string>
     <string name="setup_title">修复安装</string>
     <string name="select_patch_file">选择并修补一个文件</string>
-    <string name="patch_file_msg">选择一个原始映像文件（*.img）或一个 Odin 包（*.tar）</string>
+    <string name="patch_file_msg">选择一个原始映像文件（*.img）、Odin 包（*.tar）或 payload.bin（*.bin）</string>
     <string name="reboot_delay_toast">设备将在 5 秒后重启</string>
     <string name="flash_screen_title">安装</string>
 
@@ -113,6 +113,8 @@
     <string name="suspend_text_zygisk">%1$s 未启用，此模块暂停加载</string>
     <string name="zygisk_module_unloaded">存在兼容性问题，此模块未加载</string>
     <string name="module_empty">未安装任何模块</string>
+    <string name="confirm_install">安装模块 %1$s？</string>
+    <string name="confirm_install_title">安装确认</string>
 
     <!--Settings-->
     <string name="settings_dark_mode_title">主题模式</string>
@@ -219,6 +221,7 @@
     <string name="setup_fail">安装失败</string>
     <string name="env_fix_title">需要修复运行环境</string>
     <string name="env_fix_msg">需要一些额外的安装才能使 Magisk 正常工作。完成后自动重启，是否继续？</string>
+    <string name="env_full_fix_msg">需要重新安装才能使 Magisk 正常工作。请在应用内重新安装，recovery 模式无法正确获取设备信息。</string>
     <string name="setup_msg">正在修复运行环境</string>
     <string name="authenticate">验证您的身份</string>
     <string name="unsupport_magisk_title">不支持的 Magisk 版本</string>

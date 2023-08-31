@@ -34,26 +34,14 @@ static void sanitize_environ() {
     prctl(PR_SET_MM, PR_SET_MM_ENV_END, cur, 0, 0);
 }
 
-[[gnu::destructor]] [[maybe_unused]]
-static void zygisk_cleanup_wait() {
-    if (self_handle) {
-        // Wait 10us to make sure none of our code is executing
-        timespec ts = { .tv_sec = 0, .tv_nsec = 10000L };
-        nanosleep(&ts, nullptr);
-    }
-}
-
-static void *unload_first_stage(void *) {
-    // Wait 10us to make sure 1st stage is done
-    timespec ts = { .tv_sec = 0, .tv_nsec = 10000L };
-    nanosleep(&ts, nullptr);
+extern "C" void unload_first_stage() {
+    ZLOGD("unloading first stage\n");
     unmap_all(HIJACK_BIN);
     xumount2(HIJACK_BIN, MNT_DETACH);
-    return nullptr;
 }
 
 extern "C" void zygisk_inject_entry(void *handle) {
-    zygisk_logging();
+    rust::zygisk_entry();
     ZLOGD("load success\n");
 
     char *ld = getenv("LD_PRELOAD");
@@ -70,12 +58,11 @@ extern "C" void zygisk_inject_entry(void *handle) {
     unsetenv(MAGISKTMP_ENV);
     sanitize_environ();
     hook_functions();
-    new_daemon_thread(&unload_first_stage, nullptr);
 }
 
 // The following code runs in zygote/app process
 
-extern "C" void zygisk_log_write(int prio, const char *msg, int len) {
+extern "C" int zygisk_fetch_logd() {
     // If we don't have the log pipe set, request magiskd for it. This could actually happen
     // multiple times in the zygote daemon (parent process) because we had to close this
     // file descriptor to prevent crashing.
@@ -90,37 +77,18 @@ extern "C" void zygisk_log_write(int prio, const char *msg, int len) {
     // add this FD into fds_to_ignore to pass the check. For other cases, we accomplish this by
     // hooking __android_log_close and closing it at the same time as the rest of logging FDs.
 
-    if (logd_fd < 0) {
-        android_logging();
-        if (int fd = zygisk_request(ZygiskRequest::GET_LOG_PIPE); fd >= 0) {
-            int log_pipe = -1;
-            if (read_int(fd) == 0) {
-                log_pipe = recv_fd(fd);
-            }
-            close(fd);
-            if (log_pipe >= 0) {
-                // Only re-enable zygisk logging if possible
-                logd_fd = log_pipe;
-                zygisk_logging();
-            }
-        } else {
-            return;
+    if (int fd = zygisk_request(ZygiskRequest::GET_LOG_PIPE); fd >= 0) {
+        int log_pipe = -1;
+        if (read_int(fd) == 0) {
+            log_pipe = recv_fd(fd);
+        }
+        close(fd);
+        if (log_pipe >= 0) {
+            return log_pipe;
         }
     }
 
-    // Block SIGPIPE
-    sigset_t mask;
-    sigset_t orig_mask;
-    sigemptyset(&mask);
-    sigaddset(&mask, SIGPIPE);
-    pthread_sigmask(SIG_BLOCK, &mask, &orig_mask);
-
-    magisk_log_write(prio, msg, len);
-
-    // Consume SIGPIPE if exists, then restore mask
-    timespec ts{};
-    sigtimedwait(&mask, nullptr, &ts);
-    pthread_sigmask(SIG_SETMASK, &orig_mask, nullptr);
+    return -1;
 }
 
 static inline bool should_load_modules(uint32_t flags) {
@@ -279,7 +247,7 @@ static void setup_files(int client, const sock_cred *cred) {
     string ld_data = read_string(client);
     xwrite(ld_fd, ld_data.data(), ld_data.size());
     close(ld_fd);
-    setfilecon(mbin.data(), "u:object_r:" SEPOL_FILE_TYPE ":s0");
+    setfilecon(mbin.data(), MAGISK_FILE_CON);
     xmount(mbin.data(), hbin, nullptr, MS_BIND, nullptr);
 
     send_fd(client, app_fd);
@@ -306,8 +274,6 @@ static void get_process_info(int client, const sock_cred *cred) {
     int manager_app_id = get_manager();
     if (to_app_id(uid) == manager_app_id) {
         flags |= PROCESS_IS_MAGISK_APP;
-    } else if (to_app_id(uid) == sys_ui_app_id) {
-        flags |= PROCESS_IS_SYS_UI;
     }
     if (denylist_enforced) {
         flags |= DENYLIST_ENFORCING;
@@ -355,7 +321,7 @@ static void get_process_info(int client, const sock_cred *cred) {
 }
 
 static void send_log_pipe(int fd) {
-    // There is race condition here, but we can't really do much about it...
+    int logd_fd = rust::get_magiskd().get_log_pipe();
     if (logd_fd >= 0) {
         write_int(fd, 0);
         send_fd(fd, logd_fd);
